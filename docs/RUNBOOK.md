@@ -7,7 +7,81 @@ Mọi lệnh chạy từ thư mục gốc `~/Ansolo/model`, dùng `.venv/bin/pyt
 
 ---
 
-## Tổng quan thời gian
+## Chọn đường vào theo nguồn dữ liệu
+
+Mỗi nguồn có một script dựng dataset riêng, nhưng **tất cả đổ về cùng một schema
+`.npz`** nên các bước train phía sau giống hệt nhau.
+
+### A. Avast-CTU (reduced reports) — nhanh nhất để thử
+
+```bash
+.venv/bin/python scripts/build_avast_ctu.py \
+  --reports <thư mục reduced>/ --labels <public_labels.csv> \
+  --out data/avast --limit 2000          # bỏ --limit khi chạy thật
+
+.venv/bin/python scripts/train.py \
+  --config configs/default.yaml --config configs/cpu_light.yaml \
+  --config configs/avast_ctu.yaml --set data.root=data/avast
+```
+
+Chia train/test **theo thời gian** (mốc 2019-08-01) do script tự áp đặt.
+Mốc so sánh của bài báo gốc: **94,5%** (static+dynamic) / **~63%** (chỉ static).
+Ra gần 100% là có rò rỉ. Đặc tả bộ này: `docs/avast-ctu-spec.md`.
+
+### B. CAPE features đã trích sẵn + EMBER `.npy`
+
+```bash
+.venv/bin/python scripts/build_dataset_a.py \
+  --cape-root <thư mục có raw/<split>/<family>/*.json> \
+  --ember ember.npy --ember-ids ember_ids.npy \
+  --pe-dir <thư mục PE> \
+  --raw-report-dir /opt/CAPEv2/storage/analyses \   # nếu raw report còn
+  --out data/A --exclude-family Benign
+
+.venv/bin/python scripts/train.py \
+  --config configs/default.yaml --config configs/cpu_light.yaml \
+  --config configs/ember.yaml --config configs/dataset_a.yaml \
+  --set data.root=data/A
+```
+
+`--raw-report-dir` là tuỳ chọn nhưng **nên có**: raw report giữ tham số từng lời gọi,
+thiếu nó thì backend `semantic_seq` chạy ở chế độ suy giảm.
+EMBER `.npy` dạng ma trận thuần thì **bắt buộc** kèm `--ember-ids`.
+
+### C. File PE thô + CAPE report thô
+
+Đây là đường đi đầy đủ nhất, mô tả chi tiết ở **Bước 0–8** bên dưới.
+
+```bash
+.venv/bin/python scripts/extract_features.py \
+  --pe-dir <PE> --report-dir <reports> --labels labels.csv --out data/real
+```
+
+### D. Dữ liệu giả — kiểm tra pipeline, không cần dữ liệu thật
+
+```bash
+.venv/bin/python scripts/make_dummy_data.py --root data/dummy --families 30
+.venv/bin/python scripts/train.py \
+  --config configs/default.yaml --config configs/dummy_smoke.yaml
+```
+
+Luôn chạy được. Dùng để xác nhận môi trường ổn trước khi đụng dữ liệu thật.
+
+---
+
+## Sau khi có dataset — các bước chung cho mọi nguồn
+
+```bash
+.venv/bin/python scripts/run_experiments.py --config ... --out results/v1  # ma trận thí nghiệm
+.venv/bin/python scripts/eval_extensions.py --run <run_dir>                # §11 + §12
+.venv/bin/python scripts/analyze_alpha.py  --run <run_dir>                 # bằng chứng Claim 3
+```
+
+Chi tiết ở Bước 6–8.
+
+---
+
+## Tổng quan thời gian (đường C — đầy đủ nhất)
 
 | Bước | Việc | Thời gian |
 |---|---|---|
