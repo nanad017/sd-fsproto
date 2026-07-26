@@ -1,0 +1,43 @@
+# Avast-CTU Public CAPE Dataset (reduced reports), 48,976 mẫu / 10 họ.
+#
+# GIỚI HẠN CỦA BỘ NÀY — phải nêu trong paper, không được giấu:
+#   * Không có file PE gốc  -> tắt nhánh bytes / image / ember
+#   * resolved_apis là TẬP  -> dùng backend api_set, KHÔNG dùng transformer chuỗi
+#   * Không có tham số call, không có cây tiến trình, không có nhánh network
+#   * 10 họ  -> KHÔNG đủ chia family-disjoint, nên đây KHÔNG phải kết quả few-shot
+#
+# Chia train/test THEO THỜI GIAN (mốc 2019-08-01) do build_avast_ctu.py áp đặt.
+# Chia ngẫu nhiên làm accuracy static-only nhảy từ ~63% lên >95% — vô nghĩa.
+#
+# Mốc so sánh của paper gốc (HMIL, time split):
+#   static + dynamic = 94,5%   |   chỉ static = ~63%
+
+run_dir: runs/avast_ctu
+
+data:
+  root: data/avast
+  split_mode: sample        # split gán sẵn theo ngày trong index.json
+  n_way: 5                  # 10 họ -> 5-way lấy ngẫu nhiên trong đó
+  k_shot: 5
+  n_query: 10
+  n_unknown: 0              # không có họ nào giữ riêng ra làm unknown
+  episodes_per_epoch: 100
+  val_episodes: 60
+  test_episodes: 400
+
+model:
+  static:
+    branches: [imports, strings, metadata]   # không có PE gốc
+  dynamic:
+    backend: api_set                         # không có thứ tự lời gọi
+    api_set:
+      vocab: 8192
+      embed_dim: 128
+      n_tags: 16
+      hidden: 256
+  fewshot:
+    multi_proto: true
+    max_protos: 3
+
+loss:
+  lambda_align: 0.2         # static <-> dynamic vẫn có nghĩa: cả hai view đều thật

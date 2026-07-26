@@ -1,0 +1,36 @@
+# CPU-only training profile (measured: ~4.8 min/epoch at 200 episodes on 14 threads).
+# Overlay on top of default.yaml for every real-data run on a machine without a GPU.
+
+data:
+  episodes_per_epoch: 100     # halved vs default; early stopping does the rest
+  val_episodes: 60
+  test_episodes: 400
+
+model:
+  embed_dim: 128
+  static:
+    out_dim: 128
+    bytes:
+      max_len: 8192           # PE prefix: header + entry point region is what matters
+      embed_dim: 8
+      channels: 96
+      kernel: 256
+      stride: 256
+    image: {size: 64, channels: [24, 48, 96]}
+    imports: {hash_dim: 4096, embed_dim: 64}
+    strings: {hash_dim: 4096, embed_dim: 64}
+    metadata: {in_dim: 32, hidden: [128, 128]}
+  dynamic:
+    out_dim: 128
+    d_model: 64
+    n_heads: 4
+    n_layers: 2
+    max_seq_len: 256
+    graph: {node_types: 8, edge_types: 8, feat_hash: 4096, hidden: 96, layers: 3}
+  fusion:
+    hidden: 96
+
+train:
+  epochs: 20
+  early_stop_patience: 5
+  log_every: 25

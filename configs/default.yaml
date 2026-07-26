@@ -1,0 +1,115 @@
+# SD-FSProto default configuration.
+# Override with a second YAML (deep-merged) for machine/experiment-specific settings.
+
+seed: 42
+device: auto            # auto | cpu | cuda
+run_dir: runs/default
+
+data:
+  root: data/dummy      # directory containing index.json + samples/*.npz
+  n_way: 5
+  k_shot: 5
+  n_query: 10
+  n_unknown: 5          # open-set distractor queries per val/test episode
+  episodes_per_epoch: 200
+  val_episodes: 100
+  test_episodes: 600
+  num_workers: 0
+
+model:
+  modality: both        # both | static | dynamic  (single-view ablations)
+  embed_dim: 256        # dimension of the fused representation z
+
+  static:
+    # Enabled static branches (ablation: shrink this list).
+    # With pre-computed EMBER vectors use [ember, bytes, image]: EMBER already
+    # subsumes metadata + imports + strings, while bytes/image add the byte order
+    # and 2-D layout that EMBER's histograms discard.
+    # Without EMBER use [bytes, image, imports, strings, metadata].
+    branches: [bytes, image, imports, strings, metadata]
+    out_dim: 256        # z_s dimension
+    ember:              # pre-computed EMBER feature vector
+      in_dim: 2568      # EMBER2024; EMBER2018 = 2381
+      hidden: [1024, 512]
+      dropout: 0.1
+      log1p: true       # EMBER counts are heavily skewed
+    bytes:              # MalConv-style gated CNN over raw bytes
+      max_len: 16384
+      embed_dim: 8
+      channels: 128
+      kernel: 512
+      stride: 512
+    image:              # grayscale binary image CNN
+      size: 64
+      channels: [32, 64, 128]
+    imports:            # hashed import tokens -> embedding bag
+      hash_dim: 4096
+      embed_dim: 64
+    strings:            # hashed printable-string tokens -> embedding bag
+      hash_dim: 4096
+      embed_dim: 64
+    metadata:           # PE header/section numeric features
+      in_dim: 32
+      hidden: [128, 128]
+
+  dynamic:
+    backend: semantic_seq   # api_seq | semantic_seq | behavior_graph | api_set
+    out_dim: 256            # z_d dimension
+    api_set:                # order-free backend, for reports without a call sequence
+      vocab: 8192
+      embed_dim: 128
+      n_tags: 16            # semantic context tags (multi-hot)
+      hidden: 256
+    api_vocab: 512
+    sem_vocab: 2048
+    max_seq_len: 256
+    d_model: 128
+    n_heads: 4
+    n_layers: 2
+    dropout: 0.1
+    graph:
+      node_types: 8
+      edge_types: 8
+      feat_hash: 4096
+      hidden: 128
+      layers: 3
+
+  fusion:
+    kind: reliability       # concat | attention | late_vote | reliability
+    static_rel_dim: 8       # raw static reliability signal dim (from extraction)
+    dyn_rel_dim: 8          # raw dynamic reliability signal dim
+    hidden: 128
+
+  fewshot:
+    metric: euclidean       # euclidean | cosine
+    multi_proto: true
+    max_protos: 3           # M: sub-prototypes per family (capped by K)
+    tau: null               # unknown-family distance threshold; null = calibrate on val
+
+loss:
+  lambda_con: 0.5           # supervised contrastive
+  lambda_align: 0.2         # static<->dynamic alignment of the same sample
+  lambda_sep: 0.1           # inter-family prototype separation
+  temp_con: 0.1             # supcon temperature
+  margin_sep: 4.0           # hinge margin for prototype separation
+
+train:
+  epochs: 30
+  lr: 0.001
+  weight_decay: 0.0001
+  grad_clip: 5.0
+  scheduler: cosine         # cosine | none
+  early_stop_patience: 10
+  log_every: 50
+
+semi_supervised:
+  enabled: false
+  retrieve_k: 20            # candidate unlabeled neighbours per family
+  conf_threshold: 0.8       # min pseudo-label confidence
+  beta: 0.5                 # pseudo-support weight in prototype formula
+
+drift:
+  enabled: false
+  gamma: 0.2                # EMA update rate for prototypes
+  spawn_dist: auto          # auto = 3x mean intra-family spread; or a fixed number
+  max_protos: 3             # spawn needs a cluster of far samples, not one outlier

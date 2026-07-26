@@ -1,0 +1,23 @@
+# Small-scale overrides for CPU smoke tests on the synthetic dummy dataset.
+run_dir: runs/dummy_smoke
+
+data:
+  root: data/dummy
+  episodes_per_epoch: 60
+  val_episodes: 40
+  test_episodes: 100
+
+model:
+  embed_dim: 128
+  static:
+    out_dim: 128
+    bytes: {max_len: 16384, embed_dim: 8, channels: 64, kernel: 256, stride: 256}
+    image: {size: 64, channels: [16, 32, 64]}
+  dynamic:
+    out_dim: 128
+    d_model: 64
+    n_layers: 2
+
+train:
+  epochs: 5
+  log_every: 20

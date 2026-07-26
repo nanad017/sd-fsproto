@@ -1,0 +1,417 @@
+﻿Few-Shot Static-Dynamic Malware Family Classification là hướng phân loại malware theo family mới khi mỗi family chỉ có rất ít mẫu gán nhãn, ví dụ 1-shot, 3-shot, 5-shot, bằng cách kết hợp đặc trưng tĩnh của PE file và hành vi động khi chạy trong sandbox. Điểm cốt lõi không phải là “train một classifier lớn với ít dữ liệu”, mà là học một không gian biểu diễn sao cho các mẫu cùng family nằm gần nhau, khác family nằm xa nhau.
+________________
+
+
+1. Bài toán nghiên cứu
+Giả sử có tập family đã biết:
+[
+\mathcal{C}_{base} = {c_1, c_2, ..., c_m}
+]
+và tập family mới:
+[
+\mathcal{C}{novel} = {c{m+1}, ..., c_{m+n}}
+]
+Trong giai đoạn huấn luyện, mô hình học trên các family cũ. Khi gặp family mới, mô hình chỉ được cung cấp rất ít mẫu gán nhãn cho mỗi family, gọi là support set:
+[
+S = {(x_i, y_i)}_{i=1}^{N \times K}
+]
+Trong đó:
+* (N): số malware family mới trong một episode.
+* (K): số mẫu gán nhãn mỗi family.
+* (Q): tập mẫu cần phân loại.
+Ví dụ 5-way 5-shot nghĩa là có 5 family mới, mỗi family chỉ có 5 mẫu gán nhãn. Một nghiên cứu multimodal few-shot malware classification năm 2026 cũng dùng thiết lập few-shot với static grayscale image và dynamic API call sequence, sau đó dùng prototypical network để phân loại family mới. (oaepublish.com)
+________________
+
+
+2. Đầu vào của hệ thống
+Mỗi PE malware sample (x) nên được biểu diễn bằng hai nguồn thông tin:
+2.1. Static view
+Không chạy malware, chỉ trích xuất từ PE file:
+[
+x_s = {header, section, import, export, string, entropy, byte, opcode}
+]
+Có thể dùng:
+* PE header features.
+* Section entropy, section size, permission.
+* Import table, DLL/API imports.
+* Printable strings.
+* Byte sequence hoặc grayscale image.
+* Opcode/CFG/FCG nếu có disassembly.
+Static view có ưu điểm là nhanh, rẻ, dễ scale. Nhưng điểm yếu là dễ bị ảnh hưởng bởi packing, obfuscation, section padding hoặc import table manipulation. Vì vậy, nếu chỉ dùng static feature thì mô hình dễ học shortcut.
+2.2. Dynamic view
+Chạy mẫu trong sandbox và ghi nhận hành vi:
+[
+x_d = {API\ calls, arguments, file, registry, process, network}
+]
+Có thể dùng:
+* API call sequence.
+* API arguments.
+* File operations.
+* Registry operations.
+* Process creation/injection.
+* Network connection.
+* Mutex, service creation, scheduled task.
+Dynamic view phản ánh hành vi thực tế hơn, nhưng tốn chi phí và có thể bị malware né sandbox bằng anti-VM, anti-debug, sleep, user-activity check hoặc time-triggered behavior. Nguồn 2026 cũng nhấn mạnh dynamic analysis có chi phí cao hơn và có thể bị né bởi anti-virtualization, anti-sandbox hoặc time-triggered malware. (oaepublish.com)
+________________
+
+
+3. Kiến trúc đề xuất
+Có thể đặt tên phương pháp là:
+SD-FSProto: Static-Dynamic Few-Shot Prototypical Learning for PE Malware Family Classification
+Kiến trúc gồm 5 module chính.
+________________
+
+
+4. Module 1: Static Encoder
+Static encoder học biểu diễn:
+[
+z_s = E_s(x_s)
+]
+Có thể thiết kế theo nhiều nhánh:
+Nhánh static
+	Mô hình phù hợp
+	Byte sequence
+	MalConv, Transformer, 1D-CNN
+	PE grayscale image
+	CNN, ResNet-light
+	Import/API/string
+	Transformer, BiLSTM, TF-IDF + MLP
+	PE metadata
+	MLP
+	CFG/FCG
+	GNN
+	Một thiết kế thực tế là dùng static image từ binary để bắt pattern cấu trúc tổng quát, kết hợp PE metadata để tránh mô hình chỉ học texture vô nghĩa.
+Điểm cần cẩn thận: binary image nhìn có vẻ mạnh, nhưng có thể học artifact của compiler, packer hoặc dataset hơn là hành vi malware. Vì vậy nên có thêm import/section/entropy để tăng ý nghĩa bảo mật.
+________________
+
+
+5. Module 2: Dynamic Behavior Encoder
+Dynamic encoder học biểu diễn:
+[
+z_d = E_d(x_d)
+]
+Có ba cách biểu diễn dynamic behavior.
+Cách 1: API sequence encoder
+Biểu diễn malware như chuỗi:
+CreateFile → WriteFile → RegSetValue → CreateProcess → connect
+
+
+Dùng BiLSTM, GRU hoặc Transformer để học thứ tự hành vi.
+Cách 2: API + argument semantic encoder
+Không chỉ dùng tên API mà thêm ngữ nghĩa tham số:
+RegSetValue(HKCU\Software\Microsoft\Windows\CurrentVersion\Run)
+CreateFile(%APPDATA%\payload.exe)
+CreateProcess(cmd.exe /c ...)
+
+
+Sau đó chuẩn hóa thành token ngữ nghĩa:
+RegSetValue<RUN_KEY>
+CreateFile<USER_WRITABLE_EXECUTABLE>
+CreateProcess<SHELL_EXECUTION>
+
+
+Cách này tốt hơn vì cùng một API có thể benign hoặc malicious tùy tham số.
+Cách 3: Behavior graph encoder
+Tạo đồ thị hành vi:
+[
+G_d = (V, E)
+]
+Trong đó node có thể là:
+Process, API, File, RegistryKey, IP, Domain, Mutex
+
+
+Edge có thể là:
+process calls API
+process writes file
+process modifies registry
+process connects domain
+process creates process
+
+
+Sau đó dùng GNN hoặc temporal GNN. Đây là hướng mạnh hơn API sequence vì nó giữ được quan hệ giữa hành vi và đối tượng bị tác động.
+________________
+
+
+6. Module 3: Static-Dynamic Fusion
+Không nên fusion bằng cách nối vector đơn giản:
+[
+z = [z_s; z_d]
+]
+Cách này yếu vì static và dynamic có chất lượng không đồng đều. Một hướng hiện đại hơn là dùng cross-modal fusion, ví dụ chia feature thành các segment rồi học quan hệ giữa static segment và dynamic segment bằng graph/message passing. Một công trình năm 2026 đề xuất GNN-based fusion bằng cách chia feature theo modality, tạo bipartite graph giữa các segment và dùng cross-modal message passing, sau đó đưa representation vào prototypical network. (oaepublish.com)
+Có thể cải tiến thành reliability-aware fusion:
+[
+z = \alpha_s z_s + \alpha_d z_d + \alpha_{sd} z_{sd}
+]
+Trong đó:
+* (\alpha_s): độ tin cậy của static view.
+* (\alpha_d): độ tin cậy của dynamic view.
+* (z_{sd}): biểu diễn tương tác static-dynamic.
+* (\alpha_{sd}): mức độ nhất quán giữa static và dynamic.
+Ví dụ:
+Tình huống
+	Xử lý
+	File bị packed, entropy cao, import ít bất thường
+	Giảm trọng số static
+	Dynamic trace quá ngắn
+	Giảm trọng số dynamic
+	Static có API nguy hiểm nhưng dynamic không kích hoạt
+	Đánh dấu behavior-incomplete
+	Static và dynamic cùng chỉ ra persistence/injection
+	Tăng confidence
+	Dynamic behavior rõ ràng nhưng static bị obfuscated
+	Ưu tiên dynamic
+	Đây là điểm có thể tạo novelty tốt hơn so với các mô hình fusion thông thường.
+________________
+
+
+7. Module 4: Prototype-based Few-Shot Classifier
+Thay vì train classifier cố định, dùng prototype cho từng family.
+Với mỗi family (c), prototype được tính từ support samples:
+[
+p_c = \frac{1}{K}\sum_{(x_i,y_i)\in S_c} f(x_i)
+]
+Trong đó:
+[
+f(x_i) = Fusion(E_s(x_s), E_d(x_d))
+]
+Mẫu query (x_q) được phân loại bằng khoảng cách tới prototype:
+[
+P(y=c|x_q)=
+\frac{\exp(-d(f(x_q),p_c))}
+{\sum_{c'}\exp(-d(f(x_q),p_{c'}))}
+]
+Nếu (x_q) gần prototype của family (c), nó được phân vào family đó.
+Điểm hay của hướng này là khi có family mới, không cần train lại toàn bộ classifier. Chỉ cần vài mẫu gán nhãn để tạo prototype mới.
+________________
+
+
+8. Module 5: Multi-Prototype cho mỗi family
+Một giả định yếu của prototypical network chuẩn là mỗi family chỉ có một prototype. Nhưng malware family thường có nhiều biến thể: packed/unpacked, downloader/dropper/payload, phiên bản cũ/mới, hoặc biến thể dùng tactic khác nhau.
+Do đó, nên dùng multi-prototype:
+[
+P_c = {p_{c}^{1}, p_{c}^{2}, ..., p_{c}^{M}}
+]
+Khi phân loại:
+[
+d(x, c) = \min_{j} d(f(x), p_c^j)
+]
+Nghĩa là một mẫu được xem là thuộc family (c) nếu nó gần ít nhất một subtype prototype của family đó.
+Hướng này đã có nền tảng trong few-shot malware classification: SIMPLE dùng multi-prototype modeling cho unknown family recognition dựa trên API call sequences; repository công khai cũng mô tả đây là few-shot malware classification bằng API sequences và có triển khai baseline/model. (GitHub)
+________________
+
+
+9. Huấn luyện bằng episodic meta-learning
+Huấn luyện không nên làm như classification thông thường. Nên mô phỏng đúng kịch bản few-shot bằng episode.
+Mỗi episode:
+1. Chọn ngẫu nhiên (N) family từ training families.
+2. Với mỗi family, chọn (K) mẫu làm support.
+3. Chọn (Q) mẫu còn lại làm query.
+4. Tạo prototype từ support.
+5. Phân loại query bằng khoảng cách tới prototype.
+6. Cập nhật encoder/fusion để query gần đúng prototype.
+Loss chính:
+[prototype
+\mathcal{L}_{cls}
+-\sum_{(x_q,y_q)}
+\log P(y_q|x_q)
+]
+Nên bổ sung thêm contrastive loss:
+[
+\mathcal{L}_{con}
+]
+để kéo static và dynamic của cùng malware lại gần nhau, đồng thời đẩy khác family ra xa nhau.
+Loss tổng:
+[
+\mathcal{L}
+\mathcal{L}{cls}
++
+\lambda_1 \mathcal{L}{con}
++
+\lambda_2 \mathcal{L}{align}
++
+\lambda_3 \mathcal{L}{sep}
+]
+Trong đó:
+* (\mathcal{L}_{cls}): phân loại query.
+* (\mathcal{L}_{con}): supervised contrastive loss.
+* (\mathcal{L}_{align}): ép static và dynamic cùng mẫu nhất quán.
+* (\mathcal{L}_{sep}): tăng khoảng cách giữa prototype khác family.
+________________
+
+
+10. Cơ chế inference khi gặp family mới
+Khi có một family mới với vài mẫu gán nhãn:
+1. Trích xuất static feature.
+2. Chạy sandbox để lấy dynamic trace.
+3. Tạo embedding fused.
+4. Tính prototype cho family mới.
+5. Với mẫu chưa biết, tính khoảng cách tới các prototype.
+6. Nếu gần một prototype → phân loại vào family đó.
+7. Nếu xa tất cả prototype → gán unknown family.
+Ngưỡng unknown có thể là:
+[
+\min_c d(f(x), p_c) > \tau
+]
+Khi đó mẫu được xem là family chưa biết.
+Điểm này rất quan trọng: hệ thống không nên ép mọi mẫu vào một family đã biết, vì thực tế luôn có family mới hoặc biến thể mới.
+________________
+
+
+11. Có thể mở rộng bằng semi-supervised learning
+Trong thực tế, ta thường có ít mẫu đã gán nhãn nhưng nhiều mẫu chưa gán nhãn. Có thể dùng hướng retrieval-augmented semi-supervised learning:
+* Từ vài support samples, truy xuất các mẫu chưa nhãn gần nhất.
+* Gán pseudo-label nếu confidence cao.
+* Cập nhật prototype bằng cả support thật và pseudo-support.
+* Loại bỏ mẫu mơ hồ để tránh làm prototype lệch.
+MalMixer là một ví dụ gần đây về malware family classifier dùng semi-supervised learning trong điều kiện sparse training data và domain-knowledge-aware augmentation để cải thiện few-shot malware family classification. (arXiv)
+Công thức prototype khi có mẫu pseudo-label:
+[
+p_c =
+\frac{
+\sum_{x_i \in S_c} f(x_i)
++
+\beta \sum_{\tilde{x}_j \in U_c} w_j f(\tilde{x}_j)
+}
+{
+|S_c| + \beta \sum_j w_j
+}
+]
+Trong đó:
+* (S_c): support thật.
+* (U_c): mẫu chưa nhãn được gán pseudo-label.
+* (w_j): confidence của pseudo-label.
+* (\beta): hệ số kiểm soát ảnh hưởng của pseudo-label.
+________________
+
+
+12. Xử lý concept drift
+Malware family thay đổi theo thời gian, nên vài mẫu support ở hiện tại có thể không đại diện cho biến thể tương lai. Hướng FARM năm 2026 xem malware family classification dưới concept drift, dùng latent space, drift detection bằng clustering và few-shot adaptation cho PE malware family mới. (arXiv)
+Có thể bổ sung module drift-aware prototype update:
+[
+p_c^t = (1-\gamma)p_c^{t-1} + \gamma \bar{z}_c^t
+]
+Trong đó:
+* (p_c^{t-1}): prototype cũ.
+* (\bar{z}_c^t): embedding trung bình của các mẫu mới.
+* (\gamma): tốc độ cập nhật.
+Nếu family (c) xuất hiện cụm mới cách xa prototype cũ, tạo thêm prototype phụ:
+[
+P_c = {p_c^1, p_c^2, ..., p_c^M}
+]
+Như vậy, family có thể tiến hóa mà không làm mô hình quên cấu trúc cũ.
+________________
+
+
+13. Quy trình đầy đủ của phương pháp
+Có thể mô tả pipeline như sau:
+Input: PE malware sample
+
+
+Step 1: Static analysis
+- Extract PE header, sections, imports, strings, entropy, byte/image features.
+
+
+Step 2: Dynamic analysis
+- Run sample in sandbox.
+- Extract API sequence, API arguments, file/registry/process/network behavior.
+
+
+Step 3: Encoding
+- Static encoder produces z_s.
+- Dynamic encoder produces z_d.
+
+
+Step 4: Reliability-aware fusion
+- Estimate static reliability.
+- Estimate dynamic reliability.
+- Fuse z_s and z_d into z.
+
+
+Step 5: Few-shot prototype learning
+- Build family prototypes from K labeled samples.
+- Use distance-based classification for query samples.
+
+
+Step 6: Unknown handling
+- If query is far from all prototypes, mark as unknown family.
+
+
+Step 7: Continual update
+- When analyst labels new samples, update prototype or create new sub-prototype.
+
+
+________________
+
+
+14. Điểm mới có thể claim
+Một hướng đủ mạnh nên claim theo 4 điểm:
+Claim 1: Static-dynamic complementarity
+Không chỉ dùng static hoặc dynamic riêng lẻ, mà học representation từ cả cấu trúc PE và hành vi runtime.
+Claim 2: Few-shot adaptation
+Family mới chỉ cần vài mẫu gán nhãn để tạo prototype, không cần huấn luyện lại toàn bộ mô hình.
+Claim 3: Reliability-aware fusion
+Mô hình biết khi nào static hoặc dynamic không đáng tin, ví dụ packed PE hoặc trace quá ngắn.
+Claim 4: Multi-prototype family modeling
+Một family có thể có nhiều subtype/variant, nên dùng nhiều prototype thay vì một prototype duy nhất.
+________________
+
+
+15. Thiết kế thí nghiệm
+Thí nghiệm
+	Mục tiêu
+	5-way 1-shot
+	Kiểm tra khả năng học cực ít mẫu
+	5-way 5-shot
+	Setting few-shot tiêu chuẩn
+	10-way 5-shot
+	Tăng độ khó khi nhiều family
+	Static-only
+	Ablation nhánh static
+	Dynamic-only
+	Ablation nhánh dynamic
+	Static + Dynamic concat
+	So với fusion đơn giản
+	Static + Dynamic reliability fusion
+	Kiểm tra đóng góp chính
+	Single-prototype
+	So với multi-prototype
+	________________
+
+
+16. Baseline nên so sánh
+Nên có các baseline sau:
+Nhóm baseline
+	Mô hình
+	Classical ML
+	Random Forest, XGBoost, SVM
+	Static deep learning
+	MalConv, CNN image, ResNet PE image
+	Dynamic deep learning
+	LSTM/GRU/Transformer API sequence
+	Few-shot baseline
+	Siamese Network, Matching Network, Prototypical Network, Relation Network
+	Fusion baseline
+	Early concat, late voting, attention fusion
+	Proposed
+	Reliability-aware static-dynamic multi-prototype
+	Metric nên dùng:
+* Accuracy.
+* Macro-F1.
+* Family-wise F1.
+* AUROC.
+* Unknown detection AUROC.
+* FPR.
+* Prototype compactness.
+* Inference time.
+* Sandbox cost.
+* Robust F1 trên packed/obfuscated samples.
+________________
+
+
+17. Điểm yếu cần nói thẳng
+Hướng này hay, nhưng có vài rủi ro lớn:
+Thứ nhất, few-shot không giải quyết zero-day hoàn toàn không nhãn. Nếu không có ít nhất vài mẫu gán nhãn cho family mới, hệ thống chỉ có thể phát hiện unknown hoặc cluster, chưa thể đặt tên family chính xác.
+Thứ hai, label malware family thường nhiễu. Nếu nhãn lấy từ AVClass/VirusTotal mà không làm sạch kỹ, prototype sẽ bị lệch. Khi support set chỉ có 1–5 mẫu, một nhãn sai có thể phá toàn bộ family prototype.
+Thứ ba, dynamic trace có thể không đầy đủ. Nếu malware né sandbox, trace ngắn không có nghĩa là benign. Vì vậy cần reliability score hoặc trạng thái incomplete behavior.
+Thứ tư, family-disjoint split là bắt buộc. Nếu cùng family xuất hiện ở cả train và test, kết quả few-shot sẽ bị thổi phồng.
+Thứ năm, static-dynamic fusion có thể gây hại nếu làm thô. Nếu chỉ nối vector, modality mạnh hơn sẽ lấn át modality còn lại. Cần normalization, gating hoặc cross-modal attention.

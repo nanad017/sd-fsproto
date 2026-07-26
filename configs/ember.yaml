@@ -1,0 +1,21 @@
+# Static view built on pre-computed EMBER vectors.
+#
+# EMBER already contains byte/entropy histograms, string stats, header, section
+# and hashed import/export features -> metadata, imports and strings branches are
+# redundant with it and are dropped. bytes (MalConv) and image are kept because
+# EMBER stores histograms, discarding byte order and 2-D layout.
+#
+# Ablations worth running from here:
+#   model.static.branches='[ember]'                 EMBER alone
+#   model.static.branches='[ember,bytes]'           + byte order
+#   model.static.branches='[ember,bytes,image]'     proposed
+#   model.static.branches='[bytes,image,imports,strings,metadata]'   no EMBER
+
+model:
+  static:
+    branches: [ember, bytes, image]
+    ember:
+      in_dim: 2568        # set to 2381 for EMBER2018
+      hidden: [1024, 512]
+      dropout: 0.1
+      log1p: true

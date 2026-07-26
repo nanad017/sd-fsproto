@@ -1,0 +1,22 @@
+# Minimal overrides used only to validate the experiment-runner plumbing.
+run_dir: runs/tiny
+
+data:
+  episodes_per_epoch: 20
+  val_episodes: 10
+  test_episodes: 20
+
+model:
+  embed_dim: 64
+  static:
+    out_dim: 64
+    bytes: {max_len: 4096, embed_dim: 4, channels: 32, kernel: 128, stride: 128}
+    image: {size: 64, channels: [8, 16]}
+  dynamic:
+    out_dim: 64
+    d_model: 32
+    n_layers: 1
+
+train:
+  epochs: 1
+  log_every: 100

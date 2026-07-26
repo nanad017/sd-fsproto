@@ -1,0 +1,27 @@
+# Dataset A: 5 malware families + benign, many samples per family.
+#
+# IMPORTANT: 5 families cannot support few-shot family-disjoint evaluation.
+# This config uses SAMPLE-disjoint splits — every family appears in train/val/test,
+# which measures within-family generalization, NOT novel-family adaptation.
+# Numbers from this config must NEVER be reported as few-shot results.
+# Dataset A exists in this project for: drift-over-time (§12), alpha analysis
+# (Claim 3, packed vs non-packed), and per-family deep dive.
+
+run_dir: runs/dataset_a
+
+data:
+  root: data/A
+  split_mode: sample          # sample | family  (family = few-shot protocol)
+  exclude_families: [benign]  # benign is not a family; kept for tau/alpha analysis only
+  n_way: 5                    # all 5 malware families in every episode
+  k_shot: 5
+  n_query: 10
+  n_unknown: 0                # no held-out families exist to draw unknowns from
+  episodes_per_epoch: 100
+  val_episodes: 60
+  test_episodes: 400
+
+model:
+  fewshot:
+    multi_proto: true         # subtype variation within a family is the point here
+    max_protos: 3
